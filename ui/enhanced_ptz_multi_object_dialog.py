@@ -860,7 +860,7 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 self._log(f"📡 Conectando a cámara: {ip}:{port} (usuario: {username})")
 
                 # Crear tracker con los parámetros correctos
-                self.current_tracker = create_multi_object_tracker(
+                self.current_tracker = MultiObjectPTZTracker(
                     ip=ip,
                     port=port,
                     username=username,
