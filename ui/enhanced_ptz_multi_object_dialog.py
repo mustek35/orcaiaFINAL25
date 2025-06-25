@@ -1197,15 +1197,86 @@ def create_multi_object_ptz_system(camera_list, parent=None):
         # Crear diálogo principal
         dialog = EnhancedMultiObjectPTZDialog(parent, camera_list)
         
-        # Crear bridge de integración (clase simple para conectar con el sistema principal)
+        # Crear bridge de integración (clase completa para conectar con el sistema principal)
         class PTZDetectionBridge:
+            """Puente de integración PTZ CORREGIDO"""
+
             def __init__(self, dialog):
                 self.dialog = dialog
-                
-            def send_detections(self, detections, frame_size=(1920, 1080)):
-                """Enviar detecciones al sistema PTZ"""
-                if self.dialog and self.dialog.tracking_active:
-                    self.dialog.update_detections(detections, frame_size)
+                self.active_cameras = {}
+                self.detection_count = 0
+
+            def send_detections(self, camera_id: str, detections: list, frame_size=(1920, 1080)):
+                """Enviar detecciones al sistema PTZ - FIRMA CORREGIDA"""
+                try:
+                    # Validar parámetros
+                    if not isinstance(camera_id, str):
+                        print(f"❌ camera_id debe ser string, recibido: {type(camera_id)}")
+                        return False
+
+                    if not isinstance(detections, list):
+                        print(f"❌ detections debe ser lista, recibido: {type(detections)}")
+                        return False
+
+                    # Solo procesar si el diálogo está activo
+                    if self.dialog and self.dialog.tracking_active:
+                        # Debug log
+                        print(f"🔄 PTZ Bridge: enviando {len(detections)} detecciones para cámara {camera_id}")
+
+                        # Llamar al método update_detections del diálogo
+                        self.dialog.update_detections(detections, frame_size)
+
+                        # Actualizar estadísticas
+                        self.detection_count += len(detections)
+                        if camera_id not in self.active_cameras:
+                            self.active_cameras[camera_id] = {'detections_sent': 0}
+                        self.active_cameras[camera_id]['detections_sent'] += len(detections)
+
+                        return True
+                    else:
+                        print(f"⚠️ PTZ Bridge: diálogo no activo para cámara {camera_id}")
+                        return False
+
+                except Exception as e:
+                    print(f"❌ Error en PTZ Bridge.send_detections: {e}")
+                    return False
+
+            def register_camera(self, camera_id: str, camera_data: dict):
+                """Registrar una cámara en el bridge"""
+                try:
+                    self.active_cameras[camera_id] = {
+                        'data': camera_data,
+                        'detections_sent': 0,
+                        'registered_at': __import__('time').time()
+                    }
+                    print(f"📷 Cámara registrada en PTZ Bridge: {camera_id}")
+                    return True
+                except Exception as e:
+                    print(f"❌ Error registrando cámara en PTZ Bridge: {e}")
+                    return False
+
+            def get_status(self, camera_id: str = None):
+                """Obtener estado del bridge"""
+                try:
+                    status = {
+                        'active': self.dialog.tracking_active if self.dialog else False,
+                        'total_detections': self.detection_count,
+                        'cameras_count': len(self.active_cameras),
+                        'cameras': list(self.active_cameras.keys())
+                    }
+
+                    if camera_id and camera_id in self.active_cameras:
+                        status['camera_info'] = self.active_cameras[camera_id]
+
+                    return status
+                except Exception as e:
+                    return {'error': str(e)}
+
+            def cleanup(self):
+                """Limpiar recursos del bridge"""
+                self.active_cameras.clear()
+                self.detection_count = 0
+                print("🧹 PTZ Bridge limpiado")
         
         bridge = PTZDetectionBridge(dialog)
         
@@ -1260,7 +1331,7 @@ if __name__ == "__main__":
                 detections.append(detection)
             
             if bridge:
-                bridge.send_detections(detections)
+                bridge.send_detections('test_camera', detections)
         
         # Timer para simulación
         timer = QTimer()
