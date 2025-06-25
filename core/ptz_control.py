@@ -44,6 +44,21 @@ class PTZCameraONVIF:
         }
         self.ptz.ContinuousMove(req)
 
+    def absolute_move(self, pan: float, tilt: float, zoom: float, speed: float | None = None):
+        """Mover la cámara a una posición absoluta."""
+        req = self.ptz.create_type('AbsoluteMove')
+        req.ProfileToken = self.profile_token
+        req.Position = {
+            'PanTilt': {'x': max(-1.0, min(1.0, pan)), 'y': max(-1.0, min(1.0, tilt))},
+            'Zoom': {'x': max(0.0, min(1.0, zoom))}
+        }
+        if speed is not None:
+            req.Speed = {
+                'PanTilt': {'x': speed, 'y': speed},
+                'Zoom': {'x': speed}
+            }
+        self.ptz.AbsoluteMove(req)
+
     def stop(self):
         self.ptz.Stop({'ProfileToken': self.profile_token})
 
