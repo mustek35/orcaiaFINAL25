@@ -984,63 +984,71 @@ class MultiObjectPTZTracker:
 
 def create_multi_object_tracker(ip: str, port: int, username: str, password: str,
                                config_name: str = "maritime_standard") -> MultiObjectPTZTracker:
-    """Crear tracker multi-objeto con configuración predefinida"""
-    
+    """Crear tracker multi-objeto con configuración predefinida.
+
+    Cada entrada del diccionario de presets puede incluir el parámetro
+    ``use_absolute_move`` para determinar si el tracker utilizará movimientos
+    absolutos en lugar de continuos.
+    """
+
     # Configuraciones predefinidas
-    configs = {
-        'maritime_standard': MultiObjectConfig(
-            alternating_enabled=True,
-            primary_follow_time=5.0,
-            secondary_follow_time=3.0,
-            auto_zoom_enabled=True,
-            target_object_ratio=0.25,
-            confidence_weight=0.4,
-            movement_weight=0.3,
-            size_weight=0.2,
-            proximity_weight=0.1
-        ),
-        
-        'maritime_fast': MultiObjectConfig(
-            alternating_enabled=True,
-            primary_follow_time=3.0,
-            secondary_follow_time=2.0,
-            auto_zoom_enabled=True,
-            target_object_ratio=0.3,
-            confidence_weight=0.3,
-            movement_weight=0.5,
-            size_weight=0.1,
-            proximity_weight=0.1,
-            max_objects_to_track=4,
-            zoom_speed=0.5
-        ),
-        
-        'surveillance_precise': MultiObjectConfig(
-            alternating_enabled=True,
-            primary_follow_time=8.0,
-            secondary_follow_time=4.0,
-            auto_zoom_enabled=True,
-            target_object_ratio=0.4,
-            confidence_weight=0.6,
-            movement_weight=0.2,
-            size_weight=0.1,
-            proximity_weight=0.1,
-            min_confidence_threshold=0.7,
-            max_objects_to_track=2,
-            zoom_speed=0.2
-        ),
-        
-        'single_object': MultiObjectConfig(
-            alternating_enabled=False,
-            auto_zoom_enabled=True,
-            target_object_ratio=0.35,
-            confidence_weight=0.5,
-            movement_weight=0.3,
-            size_weight=0.2,
-            max_objects_to_track=1
-        )
+    presets = {
+        'maritime_standard': {
+            'alternating_enabled': True,
+            'primary_follow_time': 5.0,
+            'secondary_follow_time': 3.0,
+            'auto_zoom_enabled': True,
+            'target_object_ratio': 0.25,
+            'confidence_weight': 0.4,
+            'movement_weight': 0.3,
+            'size_weight': 0.2,
+            'proximity_weight': 0.1,
+        },
+
+        'maritime_fast': {
+            'alternating_enabled': True,
+            'primary_follow_time': 3.0,
+            'secondary_follow_time': 2.0,
+            'auto_zoom_enabled': True,
+            'target_object_ratio': 0.3,
+            'confidence_weight': 0.3,
+            'movement_weight': 0.5,
+            'size_weight': 0.1,
+            'proximity_weight': 0.1,
+            'max_objects_to_track': 4,
+            'zoom_speed': 0.5,
+        },
+
+        'surveillance_precise': {
+            'alternating_enabled': True,
+            'primary_follow_time': 8.0,
+            'secondary_follow_time': 4.0,
+            'auto_zoom_enabled': True,
+            'target_object_ratio': 0.4,
+            'confidence_weight': 0.6,
+            'movement_weight': 0.2,
+            'size_weight': 0.1,
+            'proximity_weight': 0.1,
+            'min_confidence_threshold': 0.7,
+            'max_objects_to_track': 2,
+            'zoom_speed': 0.2,
+            'use_absolute_move': True,
+        },
+
+        'single_object': {
+            'alternating_enabled': False,
+            'auto_zoom_enabled': True,
+            'target_object_ratio': 0.35,
+            'confidence_weight': 0.5,
+            'movement_weight': 0.3,
+            'size_weight': 0.2,
+            'max_objects_to_track': 1,
+            'use_absolute_move': True,
+        }
     }
-    
-    config = configs.get(config_name, configs['maritime_standard'])
+
+    cfg_dict = presets.get(config_name, presets['maritime_standard'])
+    config = MultiObjectConfig(**cfg_dict)
     return MultiObjectPTZTracker(ip, port, username, password, multi_config=config)
 
 def get_preset_config(config_name: str) -> Optional[MultiObjectConfig]:

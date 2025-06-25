@@ -5,7 +5,11 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from core.multi_object_ptz_system import MultiObjectPTZTracker, MultiObjectConfig
+from core.multi_object_ptz_system import (
+    MultiObjectPTZTracker,
+    MultiObjectConfig,
+    create_multi_object_tracker,
+)
 
 class MockPTZService:
     def __init__(self, with_absolute=True):
@@ -59,6 +63,20 @@ class AbsoluteMoveTests(unittest.TestCase):
         tracker._send_ptz_command(0.3, 0.1)
         self.assertTrue(tracker.camera.calls)
         self.assertEqual(tracker.camera.calls[0][0], tracker.current_pan_position)
+
+
+class PresetPropagationTests(unittest.TestCase):
+    def test_preset_enables_absolute_move(self):
+        tracker = create_multi_object_tracker(
+            '0.0.0.0', 80, 'u', 'p', 'surveillance_precise'
+        )
+        self.assertTrue(tracker.multi_config.use_absolute_move)
+
+    def test_preset_default_false(self):
+        tracker = create_multi_object_tracker(
+            '0.0.0.0', 80, 'u', 'p', 'maritime_standard'
+        )
+        self.assertFalse(tracker.multi_config.use_absolute_move)
 
 if __name__ == '__main__':
     unittest.main()
