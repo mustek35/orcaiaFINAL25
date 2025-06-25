@@ -16,6 +16,20 @@ import os
 import cProfile
 import pstats
 import io
+# ===============================================
+# IMPORTS PTZ SYSTEM - CORRECCIÓN AUTOMÁTICA
+# ===============================================
+try:
+    from ui.enhanced_ptz_multi_object_dialog import (
+        create_multi_object_ptz_system, EnhancedMultiObjectPTZDialog
+    )
+    from core.ptz_tracking_integration_enhanced import PTZTrackingSystemEnhanced
+    PTZ_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ Sistema PTZ no disponible: {e}")
+    PTZ_AVAILABLE = False
+
+
 
 # NUEVAS IMPORTACIONES: Sistema de Muestreo Adaptativo
 try:
@@ -116,6 +130,14 @@ class MainGUI(QMainWindow):
         self.add_adaptive_sampling_menu_items()
 
         cargar_camaras_guardadas(self)
+        # ===============================================
+        # INICIALIZACIÓN SISTEMA PTZ - CORRECCIÓN AUTO
+        # ===============================================
+        self.ptz_detection_bridge = None
+        self.ptz_system = None
+        if PTZ_AVAILABLE:
+            self._initialize_ptz_system()
+
 
     def _setup_ptz_menu(self):
         """✅ NUEVO: Configurar menú PTZ completo"""
