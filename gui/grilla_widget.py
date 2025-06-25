@@ -797,7 +797,25 @@ class GrillaWidget(QWidget):
             if DEBUG_LOGS:
                 self.registrar_log(f"❌ Error integrando con PTZ: {e}")
 
-        self.request_paint_update()
+        
+        # ===============================================
+        # INTEGRACIÓN PTZ - CORRECCIÓN AUTOMÁTICA
+        # ===============================================
+        try:
+            main_window = self._get_main_window()
+            if main_window and hasattr(main_window, 'send_detections_to_ptz'):
+                camera_id = self.cam_data.get('ip', 'unknown') if self.cam_data else 'unknown'
+                ptz_detections = self._convert_boxes_for_ptz(boxes)
+                if ptz_detections:
+                    success = main_window.send_detections_to_ptz(camera_id, ptz_detections)
+                    if success and self.detection_count <= 10:
+                        self.registrar_log(f"🎯 PTZ: {len(ptz_detections)} detecciones enviadas a {camera_id}")
+        except Exception as e:
+            if hasattr(self, '_ptz_error_count'):
+                self._ptz_error_count = getattr(self, '_ptz_error_count', 0) + 1
+                if self._ptz_error_count <= 3:
+                    self.registrar_log(f"⚠️ Error integración PTZ: {e}")
+self.request_paint_update()
 
     def actualizar_pixmap_y_frame(self, frame):
         if not frame.isValid():
