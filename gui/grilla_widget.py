@@ -815,7 +815,7 @@ class GrillaWidget(QWidget):
                 self._ptz_error_count = getattr(self, '_ptz_error_count', 0) + 1
                 if self._ptz_error_count <= 3:
                     self.registrar_log(f"⚠️ Error integración PTZ: {e}")
-self.request_paint_update()
+        self.request_paint_update()
 
     def actualizar_pixmap_y_frame(self, frame):
         if not frame.isValid():
