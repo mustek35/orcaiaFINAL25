@@ -307,6 +307,13 @@ class MainGUI(QMainWindow):
                         f"💡 Las detecciones se enviarán automáticamente al sistema PTZ\n"
                         f"cuando esté activo el seguimiento."
                     )
+
+                    # Activar automáticamente el seguimiento del diálogo
+                    if hasattr(self, 'ptz_detection_bridge') and self.ptz_detection_bridge:
+                        dialog_obj = self.ptz_detection_bridge.ptz_system.dialog
+                        if dialog_obj and hasattr(dialog_obj, '_start_tracking'):
+                            dialog_obj._start_tracking()
+                            self.append_debug("🚀 Seguimiento PTZ iniciado automáticamente")
                 else:
                     self.append_debug("❌ Error: Diálogo PTZ multi-objeto es None")
 
@@ -371,15 +378,52 @@ class MainGUI(QMainWindow):
         except Exception as e:
             self.append_debug(f"❌ Error limpiando sistema PTZ: {e}")
 
-    def send_detections_to_ptz(self, camera_id: str, detections):
-        """Enviar detecciones al sistema PTZ si está activo"""
+    def ensure_ptz_dialog_active(self):
+        """Asegurar que el diálogo PTZ esté activo para recibir detecciones"""
         try:
             if hasattr(self, 'ptz_detection_bridge') and self.ptz_detection_bridge:
-                success = self.ptz_detection_bridge.send_detections(camera_id, detections)
-                if success:
-                    self.append_debug(f"📡 Detecciones enviadas a PTZ para cámara {camera_id}")
-                return success
+                bridge = self.ptz_detection_bridge
+                if hasattr(bridge, 'ptz_system') and bridge.ptz_system:
+                    dialog = bridge.ptz_system.dialog
+                    if dialog and not getattr(dialog, 'tracking_active', False):
+                        dialog.tracking_active = True
+                        self.append_debug("🔄 PTZ diálogo activado para recibir detecciones")
+                        return True
             return False
+        except Exception as e:
+            self.append_debug(f"❌ Error activando diálogo PTZ: {e}")
+            return False
+
+    def send_detections_to_ptz(self, camera_id: str, detections):
+        """Enviar detecciones al sistema PTZ mejorado"""
+        try:
+            # NUEVO: Asegurar que el diálogo esté activo
+            self.ensure_ptz_dialog_active()
+
+            if not hasattr(self, 'ptz_detection_bridge') or not self.ptz_detection_bridge:
+                return False
+
+            if not detections:
+                return False
+
+            # Limpiar camera_id
+            if isinstance(camera_id, str) and camera_id.startswith('camera_'):
+                camera_id = camera_id.replace('camera_', '')
+
+            # Enviar detecciones
+            success = self.ptz_detection_bridge.send_detections(camera_id, detections)
+
+            if success:
+                if not hasattr(self, '_ptz_detection_count'):
+                    self._ptz_detection_count = 0
+                self._ptz_detection_count += len(detections)
+
+                # Log limitado
+                if self._ptz_detection_count <= 50:
+                    self.append_debug(f"📡 PTZ: {len(detections)} detecciones → {camera_id}")
+
+            return success
+
         except Exception as e:
             self.append_debug(f"❌ Error enviando detecciones a PTZ: {e}")
             return False
