@@ -491,21 +491,46 @@ class MultiObjectPTZTracker:
             return False
 
     def _test_ptz_connection(self) -> bool:
-        """Probar conexión básica con la cámara PTZ"""
+        """Verificar conexión PTZ - MÉTODO MEJORADO"""
         try:
-            # Simulación de prueba de conexión
-            # En una implementación real, aquí se haría una conexión ONVIF
-            print(f"🔍 Probando conexión PTZ a {self.ip}:{self.port}")
-            
-            # Por ahora, asumimos que la conexión es exitosa
-            # En el futuro se puede implementar conexión ONVIF real
-            time.sleep(0.5)  # Simular tiempo de conexión
-            
-            print("✅ Conexión PTZ simulada exitosa")
+            from onvif import ONVIFCamera
+            import socket
+
+            print(f"🔗 Probando conexión PTZ a {self.ip}:{self.port}")
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            result = sock.connect_ex((self.ip, self.port))
+            sock.close()
+
+            if result != 0:
+                print(f"❌ No se puede conectar a {self.ip}:{self.port}")
+                return False
+
+            self.camera = ONVIFCamera(
+                self.ip,
+                self.port,
+                self.username,
+                self.password,
+                wsdl_dir='wsdl/'
+            )
+
+            self.ptz_service = self.camera.create_ptz_service()
+
+            media_service = self.camera.create_media_service()
+            profiles = media_service.GetProfiles()
+
+            if not profiles:
+                print("❌ No se encontraron perfiles de cámara")
+                return False
+
+            self.profile_token = profiles[0].token
+            print(f"✅ Conexión PTZ exitosa (perfil: {self.profile_token})")
+
             return True
-            
+
         except Exception as e:
-            print(f"❌ Error probando conexión PTZ: {e}")
+            print(f"❌ Error en conexión PTZ: {e}")
             return False
 
     def _tracking_loop(self):
