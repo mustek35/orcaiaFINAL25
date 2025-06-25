@@ -1015,8 +1015,71 @@ class PTZDetectionBridge:
             print(f"❌ Error limpiando PTZ Bridge: {e}")
 
 
+class PTZSystemWrapper:
+    """Wrapper CORREGIDO para el sistema PTZ con todos los métodos necesarios"""
+
+    def __init__(self, dialog):
+        self.dialog = dialog
+
+    def show(self):
+        """Mostrar el diálogo PTZ"""
+        if self.dialog and hasattr(self.dialog, 'show'):
+            self.dialog.show()
+            return True
+        else:
+            print("❌ Error: No se puede mostrar el diálogo PTZ")
+            return False
+
+    def hide(self):
+        """Ocultar el diálogo PTZ"""
+        if self.dialog and hasattr(self.dialog, 'hide'):
+            self.dialog.hide()
+
+    def close(self):
+        """Cerrar el diálogo PTZ"""
+        if self.dialog and hasattr(self.dialog, 'close'):
+            self.dialog.close()
+
+    def exec(self):
+        """Ejecutar el diálogo de forma modal"""
+        if self.dialog and hasattr(self.dialog, 'exec'):
+            return self.dialog.exec()
+        return False
+
+    def get_status(self):
+        """Obtener estado del sistema"""
+        if self.dialog and hasattr(self.dialog, 'tracking_active'):
+            return {
+                'active': self.dialog.tracking_active,
+                'dialog_available': True,
+                'dialog_visible': self.dialog.isVisible() if hasattr(self.dialog, 'isVisible') else False
+            }
+        return {'active': False, 'dialog_available': False, 'dialog_visible': False}
+
+    def cleanup(self):
+        """Limpiar recursos del sistema"""
+        if self.dialog and hasattr(self.dialog, 'close'):
+            self.dialog.close()
+        self.dialog = None
+
+    def is_visible(self):
+        """Verificar si el diálogo está visible"""
+        if self.dialog and hasattr(self.dialog, 'isVisible'):
+            return self.dialog.isVisible()
+        return False
+
+    def raise_(self):
+        """Traer al frente el diálogo"""
+        if self.dialog and hasattr(self.dialog, 'raise_'):
+            self.dialog.raise_()
+
+    def activateWindow(self):
+        """Activar la ventana del diálogo"""
+        if self.dialog and hasattr(self.dialog, 'activateWindow'):
+            self.dialog.activateWindow()
+
 def create_multi_object_ptz_system(camera_list, parent=None):
-    """Crear sistema PTZ multi-objeto CORREGIDO"""
+    """Crear sistema PTZ multi-objeto CORREGIDO - versión que retorna wrapper funcional"""
     try:
         print(f"🎯 Creando sistema PTZ multi-objeto con {len(camera_list)} cámara(s)...")
 
@@ -1026,44 +1089,45 @@ def create_multi_object_ptz_system(camera_list, parent=None):
             print("❌ No hay cámaras PTZ en la lista")
             return None
 
-        # Crear el diálogo PTZ
-        from ui.enhanced_ptz_multi_object_dialog import EnhancedMultiObjectPTZDialog
-        dialog = EnhancedMultiObjectPTZDialog(parent, ptz_cameras)
+        # CORRECCIÓN CRÍTICA: Crear el diálogo PTZ correctamente
+        try:
+            from ui.enhanced_ptz_multi_object_dialog import EnhancedMultiObjectPTZDialog
+            dialog = EnhancedMultiObjectPTZDialog(parent, ptz_cameras)
 
-        class PTZSystemWrapper:
-            def __init__(self, dialog):
-                self.dialog = dialog
+            # Verificar que el diálogo se creó correctamente
+            if not dialog:
+                print("❌ Error: No se pudo crear el diálogo PTZ")
+                return None
 
-            def get_status(self):
-                """Obtener estado del sistema"""
-                if self.dialog and hasattr(self.dialog, 'tracking_active'):
-                    return {
-                        'active': self.dialog.tracking_active,
-                        'dialog_available': True
-                    }
-                return {'active': False, 'dialog_available': False}
+            print("✅ Diálogo PTZ creado exitosamente")
 
-            def cleanup(self):
-                """Limpiar recursos del sistema"""
-                if self.dialog and hasattr(self.dialog, 'close'):
-                    self.dialog.close()
+        except Exception as e:
+            print(f"❌ Error creando diálogo PTZ: {e}")
+            return None
 
-        # Crear sistema wrapper
+        # Crear sistema wrapper con la clase corregida
         ptz_system = PTZSystemWrapper(dialog)
 
-        # CORRECCIÓN CRÍTICA: Crear bridge DESPUÉS del sistema
+        # Verificar que el wrapper funciona
+        if not hasattr(ptz_system, 'show'):
+            print("❌ Error: Wrapper PTZ sin método show")
+            return None
+
+        # CORRECCIÓN: Crear bridge DESPUÉS del sistema y con validación
         try:
             bridge = PTZDetectionBridge(ptz_system)
             print("🌉 Puente PTZ registrado para integración con detecciones")
         except Exception as e:
             print(f"❌ Error creando bridge PTZ: {e}")
-            return None
+            # Continuar sin bridge si es necesario
+            bridge = None
 
-        # Conectar bridge al diálogo
-        if hasattr(dialog, 'set_detection_bridge'):
-            dialog.set_detection_bridge(bridge)
-        else:
-            dialog.detection_bridge = bridge
+        # Conectar bridge al diálogo si existe
+        if bridge:
+            if hasattr(dialog, 'set_detection_bridge'):
+                dialog.set_detection_bridge(bridge)
+            else:
+                dialog.detection_bridge = bridge
 
         print("✅ Sistema PTZ multi-objeto creado exitosamente")
         return ptz_system
@@ -1097,6 +1161,45 @@ PTZ_LIMITS = {
 }
 
 
+def test_ptz_system_creation():
+    """Probar la creación del sistema PTZ para verificar que funciona"""
+    try:
+        # Datos de prueba
+        test_cameras = [{
+            'ip': '192.168.1.100',
+            'puerto': 80,
+            'usuario': 'admin',
+            'contrasena': 'admin123',
+            'tipo': 'ptz',
+            'nombre': 'Cámara PTZ Test'
+        }]
+
+        # Crear sistema
+        system = create_multi_object_ptz_system(test_cameras)
+
+        if system:
+            print("✅ Test: Sistema PTZ creado exitosamente")
+
+            # Verificar métodos necesarios
+            required_methods = ['show', 'hide', 'close', 'get_status']
+            for method in required_methods:
+                if hasattr(system, method):
+                    print(f"✅ Test: Método {method} disponible")
+                else:
+                    print(f"❌ Test: Método {method} NO disponible")
+
+            # Limpiar
+            system.cleanup()
+            return True
+        else:
+            print("❌ Test: No se pudo crear el sistema PTZ")
+            return False
+
+    except Exception as e:
+        print(f"❌ Test: Error en creación del sistema PTZ: {e}")
+        return False
+
+
 if __name__ == "__main__":
     # Código de prueba para verificar el módulo
     print("🧪 Ejecutando pruebas del módulo PTZ mejorado...")
@@ -1108,5 +1211,8 @@ if __name__ == "__main__":
     # Verificar estado
     status = get_ptz_system_status()
     print(f"Estado del sistema: {status}")
-    
+
+    # Ejecutar test de creación del sistema PTZ
+    test_ptz_system_creation()
+
     print("✅ Módulo PTZ mejorado cargado correctamente")
