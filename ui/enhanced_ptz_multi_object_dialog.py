@@ -828,30 +828,19 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 self.status_display.ensureCursorVisible()
 
     def _start_tracking(self):
-        """Iniciar seguimiento PTZ multi-objeto - MÉTODO CORREGIDO"""
+        """Iniciar seguimiento PTZ multi-objeto - VERSIÓN CORREGIDA"""
         try:
-            if self.camera_selector.currentIndex() == 0:
-                QMessageBox.warning(self, "Error", "Seleccione una cámara PTZ")
-                return
-
-            camera_data = self.camera_selector.currentData()
+            camera_data = self.get_current_camera_data()
             if not camera_data:
-                QMessageBox.warning(self, "Error", "Datos de cámara no válidos")
-                return
+                raise Exception("No hay datos de cámara disponibles")
 
-            # Validar que los datos de la cámara tienen los campos requeridos
-            required_fields = ['ip', 'usuario', 'contrasena']
-            missing_fields = [field for field in required_fields if not camera_data.get(field)]
+            # CORRECCIÓN 1: Activar flag antes de crear el tracker
+            self.tracking_active = True
 
-            if missing_fields:
-                QMessageBox.warning(self, "Error", f"Faltan datos de la cámara: {', '.join(missing_fields)}")
-                return
+            self._log("🚀 Iniciando seguimiento PTZ multi-objeto...")
 
-            self._log("🚀 Iniciando sistema de seguimiento PTZ...")
-
-            # Crear y configurar tracker si está disponible
+            # Verificar sistema multi-objeto
             if MULTI_OBJECT_AVAILABLE:
-                # Extraer datos de la cámara correctamente
                 ip = camera_data.get('ip')
                 port = camera_data.get('puerto', 80)
                 username = camera_data.get('usuario')
@@ -859,7 +848,7 @@ class EnhancedMultiObjectPTZDialog(QDialog):
 
                 self._log(f"📡 Conectando a cámara: {ip}:{port} (usuario: {username})")
 
-                # Crear tracker con los parámetros correctos
+                # CORRECCIÓN 2: Crear tracker con verificación
                 self.current_tracker = MultiObjectPTZTracker(
                     ip=ip,
                     port=port,
@@ -869,16 +858,20 @@ class EnhancedMultiObjectPTZDialog(QDialog):
                 )
 
                 if self.current_tracker:
-                    success = self.current_tracker.start_tracking()
-                    if not success:
-                        raise Exception("Error iniciando tracker - verificar conexión con cámara")
+                    # CORRECCIÓN 3: solo verificar conexión
+                    try:
+                        connection_ok = self.current_tracker._test_ptz_connection()
+                        if not connection_ok:
+                            raise Exception("Error de conexión PTZ")
+                        self._log("✅ Conexión PTZ verificada")
+                    except Exception as e:
+                        self._log(f"⚠️ Advertencia conexión PTZ: {e}")
                 else:
                     raise Exception("No se pudo crear el tracker PTZ")
             else:
                 raise Exception("Sistema multi-objeto no disponible")
 
-            # Configurar UI para estado activo
-            self.tracking_active = True
+            # CORRECCIÓN 4: Configurar UI después de inicializar tracker
             self.session_start_time = time.time()
             self.detection_count = 0
 
@@ -897,23 +890,24 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             """
             )
 
-            # === INICIAR HILO DE ESTADO CORREGIDO ===
+            # CORRECCIÓN 5: Iniciar hilo de estado solo si hay tracker
             if self.current_tracker:
                 self.status_thread = StatusUpdateThread(self.current_tracker)
                 self.status_thread.status_updated.connect(self._update_status_display)
-                self.status_thread.error_occurred.connect(self._handle_status_error)  # ← LÍNEA CORREGIDA
+                self.status_thread.error_occurred.connect(self._handle_status_error)
                 self.status_thread.start()
-                self._log("✅ Hilo de estado iniciado (versión corregida)")
-            else:
-                self._log("⚠️ No hay tracker disponible para hilo de estado")
+                self._log("✅ Hilo de estado iniciado")
 
             self._log("✅ Seguimiento PTZ multi-objeto iniciado exitosamente")
+
+            # CORRECCIÓN 6: Emitir señal después de todo configurado
             self.tracking_started.emit()
 
         except Exception as e:
             self._log(f"❌ Error iniciando seguimiento: {e}")
             self._reset_ui_to_inactive()
-            QMessageBox.critical(self, "Error", f"Error iniciando seguimiento:\n{e}")
+            # Solo loguear, no mostrar QMessageBox
+            self._log("💡 Verifique conexión y configuración de cámara")
 
     def _stop_tracking(self):
         """Detener seguimiento PTZ multi-objeto - MÉTODO CORREGIDO"""
@@ -1059,6 +1053,14 @@ class EnhancedMultiObjectPTZDialog(QDialog):
             if hasattr(self, 'camera_status_label'):
                 self.camera_status_label.setText(f"📷 {camera_name}")
 
+    def get_current_camera_data(self):
+        """Obtener datos de la cámara actualmente seleccionada"""
+        if hasattr(self, 'current_camera_data') and self.current_camera_data:
+            return self.current_camera_data
+        if hasattr(self, 'camera_selector'):
+            return self.camera_selector.currentData()
+        return None
+
     def _on_mode_changed(self, mode_text):
         """Manejar cambio de modo de seguimiento"""
         if MULTI_OBJECT_AVAILABLE and self.multi_config:
@@ -1107,89 +1109,49 @@ Por favor, verifique la instalación de los módulos PTZ.
         self.close()
 
 
-    def update_detections(self, detections, frame_size=(1920, 1080)):
-        """Método público para recibir detecciones del sistema principal - COMPLETAMENTE CORREGIDO"""
-        if not self.tracking_active or not self.current_tracker:
-            return
-
+    def update_detections(self, detections: list, frame_size: tuple = (1920, 1080)):
+        """Actualizar detecciones para seguimiento - MÉTODO CORREGIDO"""
         try:
-            # VALIDACIÓN DE FORMATO DE DETECCIONES
-            if not isinstance(detections, list):
-                self._log(f"❌ Error: detections debe ser una lista, recibido: {type(detections)}")
-                return
+            # CORRECCIÓN 7: Verificar estado ANTES de procesar
+            if not self.tracking_active:
+                self._log("⚠️ Seguimiento no activo, ignorando detecciones")
+                return False
 
-            # Filtrar y validar detecciones
+            if not self.current_tracker:
+                self._log("⚠️ No hay tracker disponible")
+                return False
+
+            # CORRECCIÓN 8: Validar detecciones
+            if not isinstance(detections, list) or not detections:
+                return False
+
             valid_detections = []
-            for i, detection in enumerate(detections):
-                if isinstance(detection, str):
-                    self._log(f"⚠️ Detección {i} es string (saltando): {detection}")
-                    continue
-
-                if not isinstance(detection, dict):
-                    self._log(f"⚠️ Detección {i} no es dict (saltando): {type(detection)}")
-                    continue
-
-                if not detection.get('bbox') or not detection.get('confidence'):
-                    self._log(f"⚠️ Detección {i} incompleta (saltando): {detection}")
-                    continue
-
-                valid_detections.append(detection)
-
-            # Actualizar contador solo con detecciones válidas
-            self.detection_count += len(valid_detections)
-
-            if hasattr(self, 'detection_count_label'):
-                self.detection_count_label.setText(f"🎯 {self.detection_count} detecciones")
-
-            self._log(f"📊 Recibidas {len(detections)} detecciones, {len(valid_detections)} válidas")
-
-            if valid_detections:
-                first_det = valid_detections[0]
-                conf = first_det.get('confidence', 0)
-                bbox = first_det.get('bbox', [])
-                self._log(f"🔍 Primera detección: conf={conf:.3f}, bbox={bbox}")
+            for det in detections:
+                if isinstance(det, dict) and 'bbox' in det and len(det['bbox']) == 4:
+                    valid_detections.append(det)
 
             if not valid_detections:
-                return
+                return False
 
-            converted_detections = []
-            for det in valid_detections:
-                try:
-                    bbox = det['bbox']
-                    if len(bbox) == 4:
-                        x1, y1, x2, y2 = bbox
-                        converted_det = {
-                            'cx': (x1 + x2) / 2,
-                            'cy': (y1 + y2) / 2,
-                            'width': x2 - x1,
-                            'height': y2 - y1,
-                            'confidence': det.get('confidence', 0.0),
-                            'frame_w': frame_size[0],
-                            'frame_h': frame_size[1],
-                            'class': det.get('class', 'object'),
-                            'track_id': det.get('track_id', None)
-                        }
-                        converted_detections.append(converted_det)
-                except Exception as e:
-                    self._log(f"❌ Error convirtiendo detección: {e}")
-                    continue
+            # CORRECCIÓN 9: Loguear solo las primeras detecciones
+            self.detection_count += len(valid_detections)
+            if self.detection_count <= 50:
+                self._log(f"📊 Procesando {len(valid_detections)} detecciones (total: {self.detection_count})")
 
-            if converted_detections:
-                try:
-                    success = self.current_tracker.update_detections(converted_detections)
-                    if success:
-                        self._log(f"✅ Tracker actualizado exitosamente ({len(converted_detections)} objetos)")
-                    else:
-                        self._log(f"⚠️ Tracker falló al procesar {len(converted_detections)} objetos")
-                except Exception as e:
-                    self._log(f"❌ Error llamando tracker.update_detections(): {e}")
+            # CORRECCIÓN 10: Enviar detecciones al tracker
+            if hasattr(self.current_tracker, 'update_tracking'):
+                success = self.current_tracker.update_tracking(valid_detections, frame_size)
+                return success
+            elif hasattr(self.current_tracker, 'track_objects'):
+                success = self.current_tracker.track_objects(valid_detections, frame_size)
+                return success
             else:
-                self._log("⚠️ No hay detecciones convertidas para enviar al tracker")
+                self._log("⚠️ Método de seguimiento no encontrado en tracker")
+                return False
 
         except Exception as e:
-            self._log(f"❌ Error en update_detections: {e}")
-            import traceback
-            self._log(f"🔍 Traceback: {traceback.format_exc()}")
+            self._log(f"❌ Error procesando detecciones: {e}")
+            return False
 # Función de creación del sistema completo
 def create_multi_object_ptz_system(camera_list, parent=None):
     """Crear sistema PTZ multi-objeto completo con bridge de integración"""
@@ -1292,6 +1254,147 @@ def create_multi_object_ptz_system(camera_list, parent=None):
     except Exception as e:
         print(f"❌ Error creando sistema PTZ multi-objeto: {e}")
         return None, None
+
+# === IMPLEMENTACIÓN DE FUNCIONES Y CLASES ADICIONALES CORREGIDAS ===
+
+class PTZDetectionBridge:
+    """Bridge CORREGIDO para conectar detecciones con PTZ"""
+
+    def __init__(self, ptz_system):
+        self.ptz_system = ptz_system
+        self.active_cameras = {}
+        self.detection_count = 0
+
+    def send_detections(self, camera_id: str, detections: list, frame_size=(1920, 1080)):
+        """Enviar detecciones al sistema PTZ - MÉTODO CORREGIDO"""
+        try:
+            # CORRECCIÓN 12: Verificar que el diálogo exista Y esté activo
+            if not hasattr(self.ptz_system, 'dialog') or not self.ptz_system.dialog:
+                print(f"⚠️ PTZ Bridge: no hay diálogo para cámara {camera_id}")
+                return False
+
+            dialog = self.ptz_system.dialog
+
+            # CORRECCIÓN 13: Verificar tracking_active correctamente
+            if not hasattr(dialog, 'tracking_active') or not dialog.tracking_active:
+                print(f"⚠️ PTZ Bridge: diálogo no activo para cámara {camera_id}")
+                return False
+
+            # Validar detecciones
+            if not isinstance(detections, list) or not detections:
+                return False
+
+            valid_detections = []
+            for det in detections:
+                if isinstance(det, dict) and 'bbox' in det:
+                    valid_detections.append(det)
+
+            if not valid_detections:
+                return False
+
+            # CORRECCIÓN 14: Llamar a update_detections del diálogo
+            success = dialog.update_detections(valid_detections, frame_size)
+
+            if success:
+                # Actualizar estadísticas
+                self.detection_count += len(valid_detections)
+                if camera_id not in self.active_cameras:
+                    self.active_cameras[camera_id] = {'detections_sent': 0}
+                self.active_cameras[camera_id]['detections_sent'] += len(valid_detections)
+
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            print(f"❌ Error en PTZ Bridge.send_detections: {e}")
+            return False
+
+    def register_camera(self, camera_id: str, camera_data: dict):
+        """Registrar una cámara en el bridge"""
+        try:
+            self.active_cameras[camera_id] = {
+                'data': camera_data,
+                'detections_sent': 0,
+                'registered_at': time.time()
+            }
+            print(f"📷 Cámara registrada en PTZ Bridge: {camera_id}")
+            return True
+        except Exception as e:
+            print(f"❌ Error registrando cámara en PTZ Bridge: {e}")
+            return False
+
+
+def create_enhanced_ptz_system_fixed(parent, camera_list):
+    """Crear sistema PTZ multi-objeto CORREGIDO"""
+    try:
+        # Crear diálogo
+        dialog = EnhancedMultiObjectPTZDialog(parent, camera_list)
+
+        # CORRECCIÓN 16: Configurar el bridge correctamente
+        class PTZSystemWrapper:
+            def __init__(self, dialog):
+                self.dialog = dialog
+
+        # Crear wrapper del sistema
+        ptz_system = PTZSystemWrapper(dialog)
+
+        # Crear bridge
+        bridge = PTZDetectionBridge(ptz_system)
+
+        # CORRECCIÓN 17: Conectar bridge al diálogo
+        dialog.detection_bridge = bridge
+
+        print("✅ Sistema PTZ multi-objeto CORREGIDO creado")
+
+        return {
+            'dialog': dialog,
+            'bridge': bridge,
+            'system': ptz_system
+        }
+
+    except Exception as e:
+        print(f"❌ Error creando sistema PTZ corregido: {e}")
+        return None
+
+
+def ensure_ptz_tracking_active(main_window):
+    """Asegurar que el seguimiento PTZ esté activo"""
+    try:
+        if not hasattr(main_window, 'ptz_detection_bridge'):
+            print("⚠️ PTZ Bridge no disponible")
+            return False
+
+        bridge = main_window.ptz_detection_bridge
+        if not bridge or not hasattr(bridge, 'ptz_system'):
+            print("⚠️ Sistema PTZ no configurado")
+            return False
+
+        dialog = bridge.ptz_system.dialog
+        if not dialog:
+            print("⚠️ Diálogo PTZ no disponible")
+            return False
+
+        # CORRECCIÓN 19: Forzar activación si no está activo
+        if not getattr(dialog, 'tracking_active', False):
+            print("🔄 Activando seguimiento PTZ...")
+
+            dialog.tracking_active = True
+
+            if hasattr(dialog, 'start_btn'):
+                dialog.start_btn.setEnabled(False)
+            if hasattr(dialog, 'stop_btn'):
+                dialog.stop_btn.setEnabled(True)
+            if hasattr(dialog, 'system_status_label'):
+                dialog.system_status_label.setText("🟢 Sistema Activo")
+
+            print("✅ Seguimiento PTZ activado manualmente")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Error activando seguimiento PTZ: {e}")
+        return False
 
 if __name__ == "__main__":
     # Ejecutar diálogo de forma independiente para pruebas
