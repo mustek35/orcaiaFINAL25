@@ -963,54 +963,64 @@ class EnhancedMultiObjectPTZDialog(QDialog):
         """)
 
     def _update_status_display(self, status):
-        """Actualizar display de estado - MÉTODO CORREGIDO"""
+        """Actualizar display de estado - CORREGIDO"""
         try:
-            # === VERIFICACIÓN CRÍTICA AGREGADA ===
-            if not status or not isinstance(status, dict):
-                return
-            # === FIN DE VERIFICACIÓN ===
-            
-            # Actualizar campos básicos si existen en la UI
+            # VERIFICACIÓN CRÍTICA: asegurar que status es un diccionario
+            if not isinstance(status, dict):
+                self._log(f"⚠️ Status inválido recibido: {type(status)}")
+                status = {
+                    'tracking_active': self.tracking_active,
+                    'camera_connected': False,
+                    'current_target': None,
+                    'object_count': 0,
+                    'ptz_moving': False
+                }
+
+            camera_connected = False
+
+            if self.current_tracker and hasattr(self.current_tracker, 'camera'):
+                try:
+                    camera_connected = (self.current_tracker.camera is not None and
+                                       hasattr(self.current_tracker, 'ptz_service') and
+                                       self.current_tracker.ptz_service is not None)
+                except:
+                    camera_connected = False
+
+            if self.tracking_active and self.current_tracker:
+                camera_connected = True
+
             if hasattr(self, 'connection_status_label'):
-                connected = status.get('connected', False)
-                connection_text = "🟢 Conectado" if connected else "🔴 Desconectado"
-                self.connection_status_label.setText(connection_text)
-            
+                if camera_connected:
+                    self.connection_status_label.setText("🟢 Conectado")
+                    self.connection_status_label.setStyleSheet("color: #28a745;")
+                else:
+                    self.connection_status_label.setText("🔴 Desconectado")
+                    self.connection_status_label.setStyleSheet("color: #dc3545;")
+
             if hasattr(self, 'tracking_status_label'):
-                tracking = status.get('tracking_active', False)
-                tracking_text = "🎯 Activo" if tracking else "⏸️ Inactivo"
-                self.tracking_status_label.setText(tracking_text)
-            
-            if hasattr(self, 'objects_count_label'):
-                objects = status.get('active_objects', 0)
-                self.objects_count_label.setText(str(objects))
-            
-            if hasattr(self, 'success_rate_label'):
-                success_rate = status.get('success_rate', 0.0)
-                self.success_rate_label.setText(f"{success_rate:.1f}%")
-            
-            if hasattr(self, 'total_detections_label'):
-                detections = status.get('total_detections', 0)
-                self.total_detections_label.setText(str(detections))
-            
-            if hasattr(self, 'moves_count_label'):
-                successful = status.get('successful_moves', 0)
-                failed = status.get('failed_moves', 0)
-                total = successful + failed
-                self.moves_count_label.setText(f"{successful}/{total}")
-            
-            # Actualizar target actual si existe
+                if self.tracking_active:
+                    self.tracking_status_label.setText("🟢 Activo")
+                    self.tracking_status_label.setStyleSheet("color: #28a745;")
+                else:
+                    self.tracking_status_label.setText("🔴 Inactivo")
+                    self.tracking_status_label.setStyleSheet("color: #dc3545;")
+
+            object_count = status.get('object_count', 0)
+            current_target = status.get('current_target')
+
+            if hasattr(self, 'objects_detected_label'):
+                self.objects_detected_label.setText(str(object_count))
+
             if hasattr(self, 'current_target_label'):
-                target = status.get('current_target')
-                target_text = f"🎯 {target}" if target else "➖ Sin objetivo"
-                self.current_target_label.setText(target_text)
-            
-            # Si hay error de estado, mostrarlo
-            if 'status_error' in status:
-                self._log(f"⚠️ Estado: {status['status_error']}")
-                
+                if current_target is not None:
+                    is_primary = status.get('is_primary', True)
+                    target_text = f"{{'id': {current_target}, 'is_primary': {is_primary}}}"
+                    self.current_target_label.setText(target_text)
+                else:
+                    self.current_target_label.setText("{'id': None, 'is_primary': True}")
+
         except Exception as e:
-            self._log(f"❌ Error crítico procesando estado: {e}")
+            self._log(f"❌ Error actualizando display de estado: {e}")
 
     def _handle_status_error(self, error_message):
         """Manejar errores del hilo de estado - MÉTODO AGREGADO"""
@@ -1098,89 +1108,88 @@ Por favor, verifique la instalación de los módulos PTZ.
 
 
     def update_detections(self, detections, frame_size=(1920, 1080)):
-        """Método público para recibir detecciones del sistema principal - CORREGIDO"""
+        """Método público para recibir detecciones del sistema principal - COMPLETAMENTE CORREGIDO"""
         if not self.tracking_active or not self.current_tracker:
             return
 
         try:
-            # Actualizar contador
-            self.detection_count += len(detections)
+            # VALIDACIÓN DE FORMATO DE DETECCIONES
+            if not isinstance(detections, list):
+                self._log(f"❌ Error: detections debe ser una lista, recibido: {type(detections)}")
+                return
+
+            # Filtrar y validar detecciones
+            valid_detections = []
+            for i, detection in enumerate(detections):
+                if isinstance(detection, str):
+                    self._log(f"⚠️ Detección {i} es string (saltando): {detection}")
+                    continue
+
+                if not isinstance(detection, dict):
+                    self._log(f"⚠️ Detección {i} no es dict (saltando): {type(detection)}")
+                    continue
+
+                if not detection.get('bbox') or not detection.get('confidence'):
+                    self._log(f"⚠️ Detección {i} incompleta (saltando): {detection}")
+                    continue
+
+                valid_detections.append(detection)
+
+            # Actualizar contador solo con detecciones válidas
+            self.detection_count += len(valid_detections)
 
             if hasattr(self, 'detection_count_label'):
-                self.detection_count_label.setText(
-                    f"🎯 {self.detection_count} detecciones"
-                )
+                self.detection_count_label.setText(f"🎯 {self.detection_count} detecciones")
 
-            # === VERIFICACIÓN Y LLAMADA CORREGIDA ===
+            self._log(f"📊 Recibidas {len(detections)} detecciones, {len(valid_detections)} válidas")
 
-            # Verificar si el tracker tiene el método correcto
-            if hasattr(self.current_tracker, 'update_detections'):
-                success = self.current_tracker.update_detections(detections)
-                if success:
-                    self._log(
-                        f"✅ Seguimiento actualizado ({len(detections)} objetos)"
-                    )
-                else:
-                    self._log(
-                        f"⚠️ Falló actualización de seguimiento"
-                    )
+            if valid_detections:
+                first_det = valid_detections[0]
+                conf = first_det.get('confidence', 0)
+                bbox = first_det.get('bbox', [])
+                self._log(f"🔍 Primera detección: conf={conf:.3f}, bbox={bbox}")
 
-            elif hasattr(self.current_tracker, 'update_tracking'):
-                # Fallback para tracker básico
-                success = self.current_tracker.update_tracking(
-                    detections, frame_size
-                )
-                if success:
-                    self._log(
-                        f"✅ Seguimiento básico actualizado ({len(detections)} objetos)"
-                    )
-                else:
-                    self._log(
-                        f"⚠️ Falló actualización de seguimiento básico"
-                    )
+            if not valid_detections:
+                return
 
-            elif hasattr(self.current_tracker, 'process_detections'):
-                # Otra posible interfaz
-                success = self.current_tracker.process_detections(
-                    detections, frame_size
-                )
-                if success:
-                    self._log(
-                        f"✅ Detecciones procesadas ({len(detections)} objetos)"
-                    )
-                else:
-                    self._log(
-                        f"⚠️ Falló procesamiento de detecciones"
-                    )
-            else:
-                # Si no tiene ningún método conocido, mostrar métodos disponibles para debug
-                available_methods = [
-                    method
-                    for method in dir(self.current_tracker)
-                    if not method.startswith('_')
-                    and callable(getattr(self.current_tracker, method))
-                ]
-                self._log("⚠️ Tracker no tiene método de actualización conocido")
-                self._log(
-                    f"🔍 Métodos disponibles: {', '.join(available_methods[:10])}"
-                )
-
-                # CORRECCIÓN APLICADA: Usar el método correcto
+            converted_detections = []
+            for det in valid_detections:
                 try:
-                    success = self.current_tracker.update_detections(detections)
-                    if success:
-                        self._log(
-                            f"✅ Llamada directa exitosa ({len(detections)} objetos)"
-                        )
-                    else:
-                        self._log(
-                            f"⚠️ Llamada directa falló"
-                        )
+                    bbox = det['bbox']
+                    if len(bbox) == 4:
+                        x1, y1, x2, y2 = bbox
+                        converted_det = {
+                            'cx': (x1 + x2) / 2,
+                            'cy': (y1 + y2) / 2,
+                            'width': x2 - x1,
+                            'height': y2 - y1,
+                            'confidence': det.get('confidence', 0.0),
+                            'frame_w': frame_size[0],
+                            'frame_h': frame_size[1],
+                            'class': det.get('class', 'object'),
+                            'track_id': det.get('track_id', None)
+                        }
+                        converted_detections.append(converted_det)
                 except Exception as e:
-                    self._log(f"❌ Error en llamada directa: {e}")
+                    self._log(f"❌ Error convirtiendo detección: {e}")
+                    continue
+
+            if converted_detections:
+                try:
+                    success = self.current_tracker.update_detections(converted_detections)
+                    if success:
+                        self._log(f"✅ Tracker actualizado exitosamente ({len(converted_detections)} objetos)")
+                    else:
+                        self._log(f"⚠️ Tracker falló al procesar {len(converted_detections)} objetos")
+                except Exception as e:
+                    self._log(f"❌ Error llamando tracker.update_detections(): {e}")
+            else:
+                self._log("⚠️ No hay detecciones convertidas para enviar al tracker")
 
         except Exception as e:
-            self._log(f"❌ Error actualizando detecciones: {e}")
+            self._log(f"❌ Error en update_detections: {e}")
+            import traceback
+            self._log(f"🔍 Traceback: {traceback.format_exc()}")
 # Función de creación del sistema completo
 def create_multi_object_ptz_system(camera_list, parent=None):
     """Crear sistema PTZ multi-objeto completo con bridge de integración"""
