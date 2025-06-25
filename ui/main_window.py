@@ -136,7 +136,8 @@ class MainGUI(QMainWindow):
         self.ptz_detection_bridge = None
         self.ptz_system = None
         if PTZ_AVAILABLE:
-            self._initialize_ptz_system()
+            # Metodo de inicialización actualizado
+            self.initialize_ptz_system()
 
 
     def _setup_ptz_menu(self):
