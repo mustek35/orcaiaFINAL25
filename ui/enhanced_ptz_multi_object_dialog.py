@@ -1112,46 +1112,77 @@ Por favor, verifique la instalación de los módulos PTZ.
     def update_detections(self, detections: list, frame_size: tuple = (1920, 1080)):
         """Actualizar detecciones para seguimiento - MÉTODO CORREGIDO"""
         try:
-            # CORRECCIÓN 7: Verificar estado ANTES de procesar
-            if not self.tracking_active:
-                self._log("⚠️ Seguimiento no activo, ignorando detecciones")
+            # Verificar estado del seguimiento
+            if not hasattr(self, 'tracking_active') or not self.tracking_active:
                 return False
 
-            if not self.current_tracker:
-                self._log("⚠️ No hay tracker disponible")
+            if not hasattr(self, 'current_tracker') or not self.current_tracker:
                 return False
 
-            # CORRECCIÓN 8: Validar detecciones
+            # Validar detecciones
             if not isinstance(detections, list) or not detections:
                 return False
 
             valid_detections = []
             for det in detections:
-                if isinstance(det, dict) and 'bbox' in det and len(det['bbox']) == 4:
+                if isinstance(det, dict) and 'bbox' in det and len(det.get('bbox', [])) == 4:
                     valid_detections.append(det)
 
             if not valid_detections:
                 return False
 
-            # CORRECCIÓN 9: Loguear solo las primeras detecciones
+            # Incrementar contador de detecciones
+            if not hasattr(self, 'detection_count'):
+                self.detection_count = 0
             self.detection_count += len(valid_detections)
+
+            # Loguear solo las primeras detecciones para evitar spam
             if self.detection_count <= 50:
                 self._log(f"📊 Procesando {len(valid_detections)} detecciones (total: {self.detection_count})")
 
-            # CORRECCIÓN 10: Enviar detecciones al tracker
+            # CORRECCIÓN CRÍTICA: Intentar múltiples métodos de seguimiento
+            success = False
+
+            # Método 1: update_tracking
             if hasattr(self.current_tracker, 'update_tracking'):
-                success = self.current_tracker.update_tracking(valid_detections, frame_size)
-                return success
-            elif hasattr(self.current_tracker, 'track_objects'):
-                success = self.current_tracker.track_objects(valid_detections, frame_size)
-                return success
-            else:
-                self._log("⚠️ Método de seguimiento no encontrado en tracker")
-                return False
+                try:
+                    success = self.current_tracker.update_tracking(valid_detections, frame_size)
+                except Exception as e:
+                    self._log(f"❌ Error en update_tracking: {e}")
+
+            # Método 2: track_objects (si el anterior falló)
+            if not success and hasattr(self.current_tracker, 'track_objects'):
+                try:
+                    success = self.current_tracker.track_objects(valid_detections, frame_size)
+                except Exception as e:
+                    self._log(f"❌ Error en track_objects: {e}")
+
+            # Método 3: process_detections (último recurso)
+            if not success and hasattr(self.current_tracker, 'process_detections'):
+                try:
+                    success = self.current_tracker.process_detections(valid_detections, frame_size)
+                except Exception as e:
+                    self._log(f"❌ Error en process_detections: {e}")
+
+            # Si ningún método funcionó, mostrar error solo una vez cada 10 intentos
+            if not success:
+                if not hasattr(self, '_tracking_error_count'):
+                    self._tracking_error_count = 0
+                self._tracking_error_count += 1
+
+                if self._tracking_error_count % 10 == 1:  # Solo cada 10 errores
+                    self._log("⚠️ Método de seguimiento no encontrado en tracker")
+
+            return success
 
         except Exception as e:
             self._log(f"❌ Error procesando detecciones: {e}")
             return False
+
+    def set_detection_bridge(self, bridge):
+        """Establecer el bridge de detecciones"""
+        self.detection_bridge = bridge
+        self._log("🌉 Bridge de detecciones configurado")
 # Función de creación del sistema completo
 def create_multi_object_ptz_system(camera_list, parent=None):
     """Crear sistema PTZ multi-objeto completo con bridge de integración"""
