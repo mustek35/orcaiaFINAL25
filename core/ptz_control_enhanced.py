@@ -30,6 +30,7 @@ class PTZCameraEnhanced:
         self.move_history = []
         self.connection_attempts = 0
         self.max_retries = 3
+        self.connected = False
         
         # Configuración
         self.default_speed = 0.5
@@ -56,12 +57,15 @@ class PTZCameraEnhanced:
             
             # Verificar capacidades PTZ
             self._check_ptz_capabilities()
-            
+            self._check_absolute_move_support()
+
             self.connection_attempts = 0
+            self.connected = True
             print(f"✅ Conexión PTZ establecida: {self.ip}:{self.puerto}")
-            
+
         except Exception as e:
             self.connection_attempts += 1
+            self.connected = False
             raise Exception(f"Error conectando a PTZ {self.ip}: {e}")
     
     def _check_ptz_capabilities(self):
@@ -88,6 +92,20 @@ class PTZCameraEnhanced:
             self.ptz_config = None
             self.pan_limits = None
             self.zoom_limits = None
+
+    def _check_absolute_move_support(self) -> bool:
+        """Verificar si la cámara soporta AbsoluteMove"""
+        try:
+            ptz_config = self.ptz.GetConfiguration({'ConfigurationToken': self.profile_token})
+            if hasattr(ptz_config, 'PanTiltLimits'):
+                print(f"✅ AbsoluteMove soportado para {self.ip}")
+                return True
+            else:
+                print(f"⚠️ AbsoluteMove limitado para {self.ip}")
+                return False
+        except Exception as e:
+            print(f"⚠️ Error verificando AbsoluteMove para {self.ip}: {e}")
+            return False
 
     def goto_preset(self, preset_token: str, speed: Optional[float] = None) -> bool:
         """
@@ -168,38 +186,48 @@ class PTZCameraEnhanced:
             print(f"❌ Error en movimiento continuo: {e}")
             return False
 
-    def absolute_move(self, pan: float, tilt: float, zoom: float, speed: Optional[float] = None) -> bool:
+    def absolute_move(self, pan: float, tilt: float, zoom: Optional[float] = None, speed: float = 0.5) -> bool:
         """
         Movimiento absoluto a una posición específica
-        
+
         Args:
             pan: Posición de pan (-1.0 a 1.0)
             tilt: Posición de tilt (-1.0 a 1.0)
-            zoom: Posición de zoom (0.0 a 1.0)
-            speed: Velocidad de movimiento
+            zoom: Posición de zoom (0.0 a 1.0) opcional
+            speed: Velocidad de movimiento (0.1 a 1.0)
             
         Returns:
             bool: True si el comando fue exitoso
         """
+        if not self.connected or not self.ptz:
+            print(f"❌ PTZ no conectado: {self.ip}")
+            return False
+
         try:
             # Validar posiciones
             pan = max(-1.0, min(1.0, pan))
             tilt = max(-1.0, min(1.0, tilt))
-            zoom = max(0.0, min(1.0, zoom))
-            
+
             req = self.ptz.create_type('AbsoluteMove')
             req.ProfileToken = self.profile_token
             req.Position = {
-                'PanTilt': {'x': pan, 'y': tilt},
-                'Zoom': {'x': zoom}
+                'PanTilt': {'x': pan, 'y': tilt}
             }
-            
-            if speed is not None:
-                req.Speed = {
-                    'PanTilt': {'x': speed, 'y': speed},
-                    'Zoom': {'x': speed}
+
+            if zoom is not None:
+                zoom = max(0.0, min(1.0, zoom))
+                req.Position['Zoom'] = {'x': zoom}
+
+            req.Speed = {
+                'PanTilt': {
+                    'x': max(0.1, min(1.0, speed)),
+                    'y': max(0.1, min(1.0, speed))
                 }
-            
+            }
+
+            if zoom is not None:
+                req.Speed['Zoom'] = {'x': max(0.1, min(1.0, speed))}
+
             self.ptz.AbsoluteMove(req)
             
             # Actualizar posición conocida
@@ -210,10 +238,14 @@ class PTZCameraEnhanced:
                 "pan": pan, "tilt": tilt, "zoom": zoom, "speed": speed
             })
             
+            print(f"✅ AbsoluteMove ejecutado - Pan: {pan:.3f}, Tilt: {tilt:.3f}")
+            if zoom is not None:
+                print(f"   Zoom: {zoom:.3f}")
+
             return True
-            
+
         except Exception as e:
-            print(f"❌ Error en movimiento absoluto: {e}")
+            print(f"❌ Error en AbsoluteMove para {self.ip}: {e}")
             return False
 
     def relative_move(self, pan_delta: float, tilt_delta: float, zoom_delta: float, speed: Optional[float] = None) -> bool:
@@ -290,10 +322,13 @@ class PTZCameraEnhanced:
     def get_position(self) -> Optional[Dict[str, float]]:
         """
         Obtiene la posición actual de la cámara
-        
+
         Returns:
             Dict con posición actual o None si hay error
         """
+        if not self.connected or not self.ptz:
+            return None
+
         try:
             req = self.ptz.create_type('GetStatus')
             req.ProfileToken = self.profile_token
@@ -864,6 +899,74 @@ def generate_preset_tour(presets: list, hold_time: float = 3.0) -> list:
         })
     
     return tour_commands
+
+
+class PTZDetectionBridge:
+    """Bridge corregido para conectar detecciones con sistema PTZ"""
+
+    def __init__(self, ptz_system):
+        self.ptz_system = ptz_system
+        self.active_cameras = {}
+        self.detection_count = 0
+
+    def send_detections(self, camera_id: str, detections: list, frame_size=(1920, 1080)):
+        """Enviar detecciones al sistema PTZ"""
+        try:
+            if (
+                not hasattr(self.ptz_system, 'dialog') or
+                not self.ptz_system.dialog or
+                not hasattr(self.ptz_system.dialog, 'tracking_active') or
+                not self.ptz_system.dialog.tracking_active
+            ):
+                print(f"⚠️ PTZ Bridge: diálogo no activo para cámara {camera_id}")
+                return False
+
+            if not isinstance(detections, list) or not detections:
+                return False
+
+            valid_detections = []
+            for det in detections:
+                if isinstance(det, dict) and 'bbox' in det:
+                    valid_detections.append(det)
+
+            if not valid_detections:
+                return False
+
+            dialog = self.ptz_system.dialog
+            if hasattr(dialog, 'update_detections'):
+                dialog.update_detections(valid_detections, frame_size)
+                self.detection_count += len(valid_detections)
+                if camera_id not in self.active_cameras:
+                    self.active_cameras[camera_id] = {'detections_sent': 0}
+                self.active_cameras[camera_id]['detections_sent'] += len(valid_detections)
+                print(f"✅ PTZ Bridge: {len(valid_detections)} detecciones enviadas para {camera_id}")
+                return True
+            else:
+                print("⚠️ PTZ Bridge: método update_detections no disponible")
+                return False
+        except Exception as e:
+            print(f"❌ Error en PTZ Bridge.send_detections: {e}")
+            return False
+
+    def register_camera(self, camera_id: str, camera_data: dict):
+        """Registrar una cámara en el bridge"""
+        try:
+            self.active_cameras[camera_id] = {
+                'data': camera_data,
+                'detections_sent': 0,
+                'registered_at': __import__('time').time()
+            }
+            print(f"📷 Cámara registrada en PTZ Bridge: {camera_id}")
+            return True
+        except Exception as e:
+            print(f"❌ Error registrando cámara en PTZ Bridge: {e}")
+            return False
+
+    def cleanup(self):
+        """Limpiar recursos del bridge"""
+        self.active_cameras.clear()
+        self.detection_count = 0
+        print("🧹 PTZ Bridge limpiado")
 
 
 # Constantes y configuraciones
