@@ -10,7 +10,6 @@ Características:
 """
 
 import time
-import numpy as np
 import threading
 from enum import Enum
 from typing import Optional, Dict, List, Tuple, Callable, Any
@@ -137,6 +136,9 @@ class MultiObjectConfig:
     max_tilt_speed: float = 0.8          # Velocidad máxima de inclinación
     movement_smoothing: float = 0.5      # Factor de suavizado (0-1)
     tracking_smoothing: float = 0.3      # Suavizado del seguimiento
+
+    # Mover mediante AbsoluteMove en lugar de ContinuousMove
+    use_absolute_move: bool = False
     
     # === CONFIGURACIÓN AVANZADA ===
     prediction_enabled: bool = True      # Habilitar predicción de movimiento
@@ -365,6 +367,11 @@ class MultiObjectPTZTracker:
         self.target_zoom_level = 0.5
         self.zoom_history = []
         self.zoom_change_count = 0
+
+        # Posición actual conocida
+        self.current_pan_position = 0.0
+        self.current_tilt_position = 0.0
+        self.current_zoom_position = 0.0
         
         # Historial de movimiento PTZ
         self.ptz_movement_history = []
@@ -527,6 +534,9 @@ class MultiObjectPTZTracker:
             self.profile_token = profiles[0].token
             print(f"✅ Conexión PTZ exitosa (perfil: {self.profile_token})")
 
+            # Obtener posición inicial si es posible
+            self._query_current_position()
+
             return True
 
         except Exception as e:
@@ -672,6 +682,27 @@ class MultiObjectPTZTracker:
             print(f"❌ Error ejecutando seguimiento: {e}")
             self.failed_tracks += 1
 
+    def _query_current_position(self):
+        """Consultar la posición PTZ actual si es posible."""
+        if not self.ptz_service or not hasattr(self.ptz_service, 'GetStatus'):
+            return None
+        try:
+            req = self.ptz_service.create_type('GetStatus')
+            req.ProfileToken = self.profile_token
+            status = self.ptz_service.GetStatus(req)
+            if hasattr(status, 'Position'):
+                self.current_pan_position = float(status.Position.PanTilt.x)
+                self.current_tilt_position = float(status.Position.PanTilt.y)
+                self.current_zoom_position = float(status.Position.Zoom.x)
+                return {
+                    'pan': self.current_pan_position,
+                    'tilt': self.current_tilt_position,
+                    'zoom': self.current_zoom_position
+                }
+        except Exception:
+            pass
+        return None
+
     def _calculate_ptz_movement(self, target_pos: ObjectPosition) -> tuple:
         """Calcular velocidades de pan y tilt necesarias"""
         # Centro del frame como referencia
@@ -694,13 +725,50 @@ class MultiObjectPTZTracker:
         return pan_speed, tilt_speed
 
     def _send_ptz_command(self, pan_speed: float, tilt_speed: float):
-        """Enviar comando PTZ a la cámara (simulación)"""
+        """Enviar comando PTZ a la cámara."""
         try:
-            # En una implementación real, aquí se enviarían comandos ONVIF
-            # Por ahora, solo registramos el movimiento
+            if self.multi_config.use_absolute_move:
+                new_pan = max(-1.0, min(1.0, self.current_pan_position + pan_speed))
+                new_tilt = max(-1.0, min(1.0, self.current_tilt_position + tilt_speed))
+                if self.ptz_service and hasattr(self.ptz_service, 'AbsoluteMove'):
+                    req = self.ptz_service.create_type('AbsoluteMove')
+                    req.ProfileToken = self.profile_token
+                    req.Position = {
+                        'PanTilt': {'x': new_pan, 'y': new_tilt},
+                        'Zoom': {'x': self.current_zoom_position}
+                    }
+                    self.ptz_service.AbsoluteMove(req)
+                elif self.camera and hasattr(self.camera, 'absolute_move'):
+                    self.camera.absolute_move(new_pan, new_tilt, self.current_zoom_position)
+                else:
+                    # Fallback a movimiento continuo
+                    if self.ptz_service and hasattr(self.ptz_service, 'ContinuousMove'):
+                        req = self.ptz_service.create_type('ContinuousMove')
+                        req.ProfileToken = self.profile_token
+                        req.Velocity = {
+                            'PanTilt': {'x': pan_speed, 'y': tilt_speed},
+                            'Zoom': {'x': 0.0}
+                        }
+                        self.ptz_service.ContinuousMove(req)
+                    elif self.camera and hasattr(self.camera, 'continuous_move'):
+                        self.camera.continuous_move(pan_speed, tilt_speed)
+                self.current_pan_position = new_pan
+                self.current_tilt_position = new_tilt
+            else:
+                if self.ptz_service and hasattr(self.ptz_service, 'ContinuousMove'):
+                    req = self.ptz_service.create_type('ContinuousMove')
+                    req.ProfileToken = self.profile_token
+                    req.Velocity = {
+                        'PanTilt': {'x': pan_speed, 'y': tilt_speed},
+                        'Zoom': {'x': 0.0}
+                    }
+                    self.ptz_service.ContinuousMove(req)
+                elif self.camera and hasattr(self.camera, 'continuous_move'):
+                    self.camera.continuous_move(pan_speed, tilt_speed)
+
             if abs(pan_speed) > 0.01 or abs(tilt_speed) > 0.01:
                 print(f"📡 PTZ comando: Pan={pan_speed:.2f}, Tilt={tilt_speed:.2f}")
-            
+
         except Exception as e:
             print(f"❌ Error enviando comando PTZ: {e}")
 
@@ -709,6 +777,10 @@ class MultiObjectPTZTracker:
         try:
             # Enviar comando de parada
             self._send_ptz_command(0.0, 0.0)
+            self.current_pan_speed = 0.0
+            self.current_tilt_speed = 0.0
+            if self.multi_config.use_absolute_move:
+                self._query_current_position()
             print("⏹️ Movimiento PTZ detenido")
         except Exception as e:
             print(f"❌ Error deteniendo PTZ: {e}")
