@@ -32,10 +32,21 @@ class PTZIntegrationFixer:
         self.backup_dir.mkdir(parents=True, exist_ok=True)
 
     def find_file(self, filename):
-        """Buscar un archivo dentro del proyecto"""
+        """Buscar un archivo dentro del proyecto y padres."""
+        # Búsqueda recursiva en el directorio de proyecto
         for path in self.project_path.rglob(filename):
             if path.is_file():
                 return path
+
+        # Intentar en directorios padres (hasta 3 niveles)
+        current = self.project_path.resolve()
+        for _ in range(3):
+            potential = current / filename
+            if potential.exists():
+                return potential
+            current = current.parent
+
+        # Devolver ruta por defecto (puede no existir)
         return self.project_path / filename
 
     def create_backup(self, file_path):
