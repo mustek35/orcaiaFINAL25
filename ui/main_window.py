@@ -20,14 +20,11 @@ import io
 # IMPORTS PTZ SYSTEM - CORRECCIÓN AUTOMÁTICA
 # ===============================================
 try:
-    from ui.enhanced_ptz_multi_object_dialog import (
-        create_multi_object_ptz_system, EnhancedMultiObjectPTZDialog
-    )
-    from core.ptz_tracking_integration_enhanced import PTZTrackingSystemEnhanced
+    from core.ptz_control_enhanced import PTZDetectionBridge, create_multi_object_ptz_system
     PTZ_AVAILABLE = True
 except ImportError as e:
-    print(f"⚠️ Sistema PTZ no disponible: {e}")
     PTZ_AVAILABLE = False
+    print(f"⚠️ PTZ no disponible: {e}")
 
 
 
@@ -137,7 +134,7 @@ class MainGUI(QMainWindow):
         self.ptz_system = None
         if PTZ_AVAILABLE:
             # Metodo de inicialización actualizado
-            self.initialize_ptz_system()
+            self._initialize_ptz_system()
 
 
     def _setup_ptz_menu(self):
@@ -162,7 +159,7 @@ class MainGUI(QMainWindow):
 
         # Acciones adicionales PTZ
         self.action_ptz_init = QAction("🔧 Inicializar Sistema PTZ", self)
-        self.action_ptz_init.triggered.connect(self.initialize_ptz_system)
+        self.action_ptz_init.triggered.connect(self._initialize_ptz_system)
         self.menu_ptz.addAction(self.action_ptz_init)
 
         self.action_ptz_stop_all = QAction("⏹️ Detener Todas las PTZ", self)
@@ -204,23 +201,6 @@ class MainGUI(QMainWindow):
     def open_ptz_multi_object_dialog(self):
         """Abrir sistema PTZ multi-objeto CORREGIDO"""
         try:
-            # ✅ CORRECCIÓN: Importar con manejo de errores mejorado
-            try:
-                from ui.enhanced_ptz_multi_object_dialog import create_multi_object_ptz_system
-            except ImportError as e:
-                self.append_debug(f"❌ Error importando sistema PTZ multi-objeto: {e}")
-                QMessageBox.critical(
-                    self,
-                    "Módulo No Disponible",
-                    f"❌ No se pudo cargar el sistema PTZ multi-objeto:\n{e}\n\n"
-                    f"Archivos requeridos:\n"
-                    f"• ui/enhanced_ptz_multi_object_dialog.py\n"
-                    f"• core/multi_object_ptz_system.py\n"
-                    f"• core/ptz_tracking_integration_enhanced.py\n\n"
-                    f"Dependencias:\n"
-                    f"• pip install onvif-zeep numpy"
-                )
-                return
 
             # Verificar que hay cámaras PTZ disponibles
             ptz_cameras = [cam for cam in self.camera_data_list if cam.get('tipo') == 'ptz']
@@ -377,6 +357,68 @@ class MainGUI(QMainWindow):
                 self.append_debug("🧹 Sistema PTZ limpiado")
         except Exception as e:
             self.append_debug(f"❌ Error limpiando sistema PTZ: {e}")
+
+    def _initialize_ptz_system(self):
+        """Inicializar sistema PTZ mejorado - CORRECCIÓN AUTOMÁTICA"""
+        try:
+            # Verificar disponibilidad
+            if not PTZ_AVAILABLE:
+                self.append_debug("⚠️ Sistema PTZ no disponible")
+                return False
+
+            # Obtener cámaras PTZ
+            ptz_cameras = []
+            if hasattr(self, 'cameras_config') and self.cameras_config:
+                cameras = self.cameras_config.get('camaras', [])
+                ptz_cameras = [cam for cam in cameras if cam.get('tipo', '').lower() == 'ptz']
+
+            if not ptz_cameras:
+                self.append_debug("📝 No hay cámaras PTZ configuradas")
+                return False
+
+            # CORRECCIÓN CRÍTICA: Crear sistema con validación
+            self.ptz_system = create_multi_object_ptz_system(ptz_cameras, self)
+
+            if self.ptz_system:
+                # CORRECCIÓN: Crear bridge desde el sistema, no independiente
+                if hasattr(self.ptz_system, 'dialog') and hasattr(self.ptz_system.dialog, 'detection_bridge'):
+                    self.ptz_detection_bridge = self.ptz_system.dialog.detection_bridge
+                    self.append_debug(f"✅ Sistema PTZ inicializado con {len(ptz_cameras)} cámara(s)")
+
+                    # Auto-iniciar seguimiento en la primera cámara
+                    if ptz_cameras:
+                        self._auto_start_ptz_tracking(ptz_cameras[0])
+                    return True
+                else:
+                    self.append_debug("❌ Error: Bridge PTZ no disponible en el diálogo")
+                    return False
+            else:
+                self.append_debug("❌ Error creando sistema PTZ")
+                return False
+
+        except Exception as e:
+            self.append_debug(f"❌ Error inicializando sistema PTZ: {e}")
+            return False
+
+    def _auto_start_ptz_tracking(self, camera_data):
+        try:
+            if not self.ptz_system or not hasattr(self.ptz_system, 'dialog'):
+                return False
+            dialog = self.ptz_system.dialog
+            camera_name = f"{camera_data.get('ip', 'Unknown')} - {camera_data.get('nombre', 'PTZ')}"
+            if hasattr(dialog, 'camera_combo'):
+                for i in range(dialog.camera_combo.count()):
+                    if camera_data.get('ip', '') in dialog.camera_combo.itemText(i):
+                        dialog.camera_combo.setCurrentIndex(i)
+                        break
+            if hasattr(dialog, '_start_tracking'):
+                dialog._start_tracking()
+                self.append_debug(f"🚀 Seguimiento PTZ auto-iniciado para {camera_name}")
+                return True
+            return False
+        except Exception as e:
+            self.append_debug(f"❌ Error auto-iniciando PTZ: {e}")
+            return False
 
     def ensure_ptz_dialog_active(self):
         """Asegurar que el diálogo PTZ esté activo para recibir detecciones"""
@@ -1115,7 +1157,7 @@ el rendimiento basado en la actividad de la escena."""
                 
                 # Reinicializar sistema PTZ si se agregó una cámara PTZ
                 if new_data.get('tipo') == 'ptz':
-                    self.initialize_ptz_system()
+                    self._initialize_ptz_system()
 
     def open_ptz_dialog(self):
         """Abre el diálogo básico de PTZ"""
@@ -1161,7 +1203,7 @@ el rendimiento basado en la actividad de la escena."""
             
             # Asegurar que el sistema PTZ está inicializado
             if not self._ptz_initialized:
-                self.initialize_ptz_system()
+                self._initialize_ptz_system()
             
             # CORRECCIÓN: Pasar la lista de cámaras correctamente
             dialog = PTZPresetDialog(self, camera_list=self.camera_data_list)

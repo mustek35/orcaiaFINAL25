@@ -902,59 +902,78 @@ def generate_preset_tour(presets: list, hold_time: float = 3.0) -> list:
 
 
 class PTZDetectionBridge:
-    """Bridge corregido para conectar detecciones con sistema PTZ"""
+    """Bridge CORREGIDO para conectar detecciones YOLO con sistema PTZ"""
 
     def __init__(self, ptz_system):
+        # CORRECCIÓN CRÍTICA: Verificar que ptz_system no sea None
+        if ptz_system is None:
+            raise ValueError("ptz_system no puede ser None")
+
         self.ptz_system = ptz_system
         self.active_cameras = {}
         self.detection_count = 0
+        self.last_detection_time = {}
+
+        # Verificar que el sistema PTZ tiene los métodos necesarios
+        if not hasattr(self.ptz_system, 'dialog'):
+            print("⚠️ PTZ System sin atributo 'dialog'")
 
     def send_detections(self, camera_id: str, detections: list, frame_size=(1920, 1080)):
-        """Enviar detecciones al sistema PTZ"""
+        """Enviar detecciones al sistema PTZ - MÉTODO CORREGIDO"""
         try:
-            if (
-                not hasattr(self.ptz_system, 'dialog') or
-                not self.ptz_system.dialog or
-                not hasattr(self.ptz_system.dialog, 'tracking_active') or
-                not self.ptz_system.dialog.tracking_active
-            ):
-                print(f"⚠️ PTZ Bridge: diálogo no activo para cámara {camera_id}")
+            # Verificar que tenemos un sistema PTZ válido
+            if not self.ptz_system:
+                print("❌ Sistema PTZ no disponible")
                 return False
 
+            # Verificar que el diálogo existe y está activo
+            if not hasattr(self.ptz_system, 'dialog') or not self.ptz_system.dialog:
+                print(f"⚠️ PTZ Bridge: no hay diálogo para cámara {camera_id}")
+                return False
+
+            dialog = self.ptz_system.dialog
+
+            # Verificar que el tracking está activo
+            if not hasattr(dialog, 'tracking_active') or not dialog.tracking_active:
+                print(f"⚠️ PTZ Bridge: seguimiento no activo para cámara {camera_id}")
+                return False
+
+            # Validar detecciones
             if not isinstance(detections, list) or not detections:
                 return False
 
             valid_detections = []
             for det in detections:
-                if isinstance(det, dict) and 'bbox' in det:
+                if isinstance(det, dict) and 'bbox' in det and len(det.get('bbox', [])) == 4:
                     valid_detections.append(det)
 
             if not valid_detections:
                 return False
 
-            dialog = self.ptz_system.dialog
+            # Intentar enviar detecciones al diálogo
             if hasattr(dialog, 'update_detections'):
-                dialog.update_detections(valid_detections, frame_size)
-                self.detection_count += len(valid_detections)
-                if camera_id not in self.active_cameras:
-                    self.active_cameras[camera_id] = {'detections_sent': 0}
-                self.active_cameras[camera_id]['detections_sent'] += len(valid_detections)
-                print(f"✅ PTZ Bridge: {len(valid_detections)} detecciones enviadas para {camera_id}")
-                return True
+                success = dialog.update_detections(valid_detections, frame_size)
+                if success:
+                    self.detection_count += len(valid_detections)
+                    if camera_id not in self.active_cameras:
+                        self.active_cameras[camera_id] = {'detections_sent': 0}
+                    self.active_cameras[camera_id]['detections_sent'] += len(valid_detections)
+                return success
             else:
-                print("⚠️ PTZ Bridge: método update_detections no disponible")
+                print("⚠️ Diálogo PTZ sin método 'update_detections'")
                 return False
+
         except Exception as e:
             print(f"❌ Error en PTZ Bridge.send_detections: {e}")
             return False
 
     def register_camera(self, camera_id: str, camera_data: dict):
-        """Registrar una cámara en el bridge"""
+        """Registrar una cámara en el bridge - MÉTODO CORREGIDO"""
         try:
             self.active_cameras[camera_id] = {
                 'data': camera_data,
                 'detections_sent': 0,
-                'registered_at': __import__('time').time()
+                'registered_at': time.time()
             }
             print(f"📷 Cámara registrada en PTZ Bridge: {camera_id}")
             return True
@@ -962,11 +981,96 @@ class PTZDetectionBridge:
             print(f"❌ Error registrando cámara en PTZ Bridge: {e}")
             return False
 
+    def get_status(self, camera_id=None):
+        """Obtener estado del bridge"""
+        try:
+            status = {
+                'active': True,
+                'cameras_registered': len(self.active_cameras),
+                'total_detections': self.detection_count,
+                'system_available': self.ptz_system is not None
+            }
+
+            if self.ptz_system and hasattr(self.ptz_system, 'dialog'):
+                dialog = self.ptz_system.dialog
+                if dialog and hasattr(dialog, 'tracking_active'):
+                    status['tracking_active'] = dialog.tracking_active
+                else:
+                    status['tracking_active'] = False
+            else:
+                status['tracking_active'] = False
+
+            return status
+        except Exception as e:
+            return {'active': False, 'error': str(e)}
+
     def cleanup(self):
         """Limpiar recursos del bridge"""
-        self.active_cameras.clear()
-        self.detection_count = 0
-        print("🧹 PTZ Bridge limpiado")
+        try:
+            self.active_cameras.clear()
+            self.detection_count = 0
+            self.last_detection_time.clear()
+            print("🧹 PTZ Bridge limpiado")
+        except Exception as e:
+            print(f"❌ Error limpiando PTZ Bridge: {e}")
+
+
+def create_multi_object_ptz_system(camera_list, parent=None):
+    """Crear sistema PTZ multi-objeto CORREGIDO"""
+    try:
+        print(f"🎯 Creando sistema PTZ multi-objeto con {len(camera_list)} cámara(s)...")
+
+        # Verificar que tenemos cámaras PTZ
+        ptz_cameras = [cam for cam in camera_list if cam.get('tipo', '').lower() == 'ptz']
+        if not ptz_cameras:
+            print("❌ No hay cámaras PTZ en la lista")
+            return None
+
+        # Crear el diálogo PTZ
+        from ui.enhanced_ptz_multi_object_dialog import EnhancedMultiObjectPTZDialog
+        dialog = EnhancedMultiObjectPTZDialog(parent, ptz_cameras)
+
+        class PTZSystemWrapper:
+            def __init__(self, dialog):
+                self.dialog = dialog
+
+            def get_status(self):
+                """Obtener estado del sistema"""
+                if self.dialog and hasattr(self.dialog, 'tracking_active'):
+                    return {
+                        'active': self.dialog.tracking_active,
+                        'dialog_available': True
+                    }
+                return {'active': False, 'dialog_available': False}
+
+            def cleanup(self):
+                """Limpiar recursos del sistema"""
+                if self.dialog and hasattr(self.dialog, 'close'):
+                    self.dialog.close()
+
+        # Crear sistema wrapper
+        ptz_system = PTZSystemWrapper(dialog)
+
+        # CORRECCIÓN CRÍTICA: Crear bridge DESPUÉS del sistema
+        try:
+            bridge = PTZDetectionBridge(ptz_system)
+            print("🌉 Puente PTZ registrado para integración con detecciones")
+        except Exception as e:
+            print(f"❌ Error creando bridge PTZ: {e}")
+            return None
+
+        # Conectar bridge al diálogo
+        if hasattr(dialog, 'set_detection_bridge'):
+            dialog.set_detection_bridge(bridge)
+        else:
+            dialog.detection_bridge = bridge
+
+        print("✅ Sistema PTZ multi-objeto creado exitosamente")
+        return ptz_system
+
+    except Exception as e:
+        print(f"❌ Error crítico creando sistema PTZ: {e}")
+        return None
 
 
 # Constantes y configuraciones
