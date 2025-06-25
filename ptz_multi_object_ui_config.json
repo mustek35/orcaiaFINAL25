@@ -1,0 +1,8 @@
+{
+    "confidence_threshold": 0.5,
+    "switch_interval": 5.0,
+    "tracking_mode": "Cambio Autom\u00e1tico",
+    "enable_alternating": true,
+    "enable_auto_zoom": true,
+    "last_saved": "2025-06-24T22:59:55.912818"
+}
