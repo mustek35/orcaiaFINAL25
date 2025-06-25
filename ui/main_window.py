@@ -199,9 +199,8 @@ class MainGUI(QMainWindow):
 
     # ✅ NUEVO: Método PTZ Multi-Objeto CORREGIDO
     def open_ptz_multi_object_dialog(self):
-        """Abrir sistema PTZ multi-objeto CORREGIDO"""
+        """Abrir sistema PTZ multi-objeto CORREGIDO - versión que maneja wrapper correctamente"""
         try:
-
             # Verificar que hay cámaras PTZ disponibles
             ptz_cameras = [cam for cam in self.camera_data_list if cam.get('tipo') == 'ptz']
 
@@ -220,11 +219,14 @@ class MainGUI(QMainWindow):
 
             self.append_debug(f"🎯 Abriendo sistema PTZ multi-objeto con {len(ptz_cameras)} cámaras...")
 
-            # ✅ CORRECCIÓN: Llamar función con manejo de errores
+            # CORRECCIÓN CRÍTICA: Manejar el wrapper correctamente
             try:
-                result = create_multi_object_ptz_system(self.camera_data_list, parent=self)
+                # Importar la función corregida
+                from core.ptz_control_enhanced import create_multi_object_ptz_system
 
-                if result is None or result == (None, None):
+                ptz_system = create_multi_object_ptz_system(self.camera_data_list, parent=self)
+
+                if ptz_system is None:
                     self.append_debug("❌ No se pudo crear el sistema PTZ multi-objeto")
                     QMessageBox.critical(
                         self,
@@ -238,64 +240,51 @@ class MainGUI(QMainWindow):
                     )
                     return
 
-                # Desempaquetar resultado
-                if isinstance(result, tuple) and len(result) == 2:
-                    dialog, bridge = result
-                else:
-                    dialog = result
-                    bridge = None
-
-                if dialog:
-                    self.append_debug("✅ Sistema PTZ multi-objeto creado exitosamente")
-
-                    # Almacenar referencia al puente si existe
-                    if bridge:
-                        self.ptz_detection_bridge = bridge
-                        self.append_debug("🌉 Puente PTZ registrado para integración con detecciones")
-
-                    # Mostrar diálogo
-                    dialog.show()
-
-                    # Opcional: Conectar señales si están disponibles
-                    if hasattr(dialog, 'tracking_started'):
-                        dialog.tracking_started.connect(
-                            lambda: self.append_debug("🎯 Seguimiento PTZ multi-objeto iniciado")
-                        )
-
-                    if hasattr(dialog, 'tracking_stopped'):
-                        dialog.tracking_stopped.connect(
-                            lambda: self.append_debug("⏹️ Seguimiento PTZ multi-objeto detenido")
-                        )
-
-                    if hasattr(dialog, 'object_detected'):
-                        dialog.object_detected.connect(
-                            lambda obj_id, obj_data: self.append_debug(f"🔍 Objeto {obj_id} detectado en PTZ")
-                        )
-
-                    self.append_debug("🚀 Sistema PTZ multi-objeto listo para usar")
-
-                    QMessageBox.information(
+                # CORRECCIÓN: Verificar que el wrapper tiene el método show
+                if not hasattr(ptz_system, 'show'):
+                    self.append_debug("❌ Error: Sistema PTZ sin método show")
+                    QMessageBox.critical(
                         self,
-                        "PTZ Multi-Objeto Iniciado",
-                        f"✅ Sistema PTZ Multi-Objeto iniciado exitosamente.\n\n"
-                        f"🎯 Funcionalidades disponibles:\n"
-                        f"• Seguimiento de múltiples objetos con alternancia\n"
-                        f"• Zoom automático inteligente\n"
-                        f"• Configuración de prioridades\n"
-                        f"• Análisis en tiempo real\n\n"
-                        f"📹 {len(ptz_cameras)} cámaras PTZ registradas\n\n"
-                        f"💡 Las detecciones se enviarán automáticamente al sistema PTZ\n"
-                        f"cuando esté activo el seguimiento."
+                        "Error del Sistema",
+                        "❌ Error crítico: PTZSystemWrapper no tiene atributo 'show'\n\n"
+                        "El sistema no pudo inicializarse correctamente.\n"
+                        "Revise la configuración y las dependencias."
+                    )
+                    return
+
+                # Guardar referencia al sistema PTZ
+                self.ptz_system = ptz_system
+
+                # CORRECCIÓN: Mostrar el diálogo de forma segura
+                try:
+                    result = ptz_system.show()
+                    if result:
+                        self.append_debug("✅ Sistema PTZ multi-objeto abierto exitosamente")
+                    else:
+                        self.append_debug("⚠️ Sistema PTZ creado pero no se pudo mostrar")
+                except Exception as show_error:
+                    self.append_debug(f"❌ Error mostrando diálogo PTZ: {show_error}")
+                    QMessageBox.warning(
+                        self,
+                        "Error de Visualización",
+                        f"❌ No se pudo mostrar el diálogo PTZ:\n{show_error}\n\n"
+                        "El sistema se creó correctamente pero no se puede visualizar."
                     )
 
-                    # Activar automáticamente el seguimiento del diálogo
-                    if hasattr(self, 'ptz_detection_bridge') and self.ptz_detection_bridge:
-                        dialog_obj = self.ptz_detection_bridge.ptz_system.dialog
-                        if dialog_obj and hasattr(dialog_obj, '_start_tracking'):
-                            dialog_obj._start_tracking()
-                            self.append_debug("🚀 Seguimiento PTZ iniciado automáticamente")
-                else:
-                    self.append_debug("❌ Error: Diálogo PTZ multi-objeto es None")
+                # Configurar bridge de detecciones si está disponible
+                if hasattr(ptz_system, 'dialog') and ptz_system.dialog:
+                    bridge = getattr(ptz_system.dialog, 'detection_bridge', None)
+                    if bridge:
+                        self.ptz_detection_bridge = bridge
+                        self.append_debug("🌉 Bridge PTZ configurado para integración")
+
+                        # Auto-iniciar seguimiento si es posible
+                        if hasattr(ptz_system.dialog, '_start_tracking'):
+                            try:
+                                ptz_system.dialog._start_tracking()
+                                self.append_debug("🚀 Seguimiento PTZ iniciado automáticamente")
+                            except Exception as start_error:
+                                self.append_debug(f"⚠️ No se pudo auto-iniciar seguimiento: {start_error}")
 
             except Exception as creation_error:
                 self.append_debug(f"❌ Error crítico creando sistema PTZ: {creation_error}")
@@ -315,8 +304,7 @@ class MainGUI(QMainWindow):
                 f"❌ Sistema PTZ multi-objeto no disponible:\n{import_error}\n\n"
                 f"Archivos requeridos:\n"
                 f"• ui/enhanced_ptz_multi_object_dialog.py\n"
-                f"• core/multi_object_ptz_system.py\n"
-                f"• core/ptz_tracking_integration_enhanced.py\n\n"
+                f"• core/ptz_control_enhanced.py\n\n"
                 f"Dependencias:\n"
                 f"• pip install onvif-zeep numpy"
             )
