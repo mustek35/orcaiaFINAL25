@@ -1096,6 +1096,7 @@ Por favor, verifique la instalación de los módulos PTZ.
         QMessageBox.critical(self, "Error del Sistema", error_msg.strip())
         self.close()
 
+
     def update_detections(self, detections, frame_size=(1920, 1080)):
         """Método público para recibir detecciones del sistema principal - CORREGIDO"""
         if not self.tracking_active or not self.current_tracker:
@@ -1112,19 +1113,16 @@ Por favor, verifique la instalación de los módulos PTZ.
 
             # === VERIFICACIÓN Y LLAMADA CORREGIDA ===
 
-            # Verificar si el tracker tiene el método esperado
-            if hasattr(self.current_tracker, 'update_multi_object_tracking'):
-                # Llamar al método correcto del tracker multi-objeto
-                success = self.current_tracker.update_multi_object_tracking(
-                    detections
-                )
+            # Verificar si el tracker tiene el método correcto
+            if hasattr(self.current_tracker, 'update_detections'):
+                success = self.current_tracker.update_detections(detections)
                 if success:
                     self._log(
-                        f"✅ Seguimiento multi-objeto actualizado ({len(detections)} objetos)"
+                        f"✅ Seguimiento actualizado ({len(detections)} objetos)"
                     )
                 else:
                     self._log(
-                        f"⚠️ Falló actualización de seguimiento multi-objeto"
+                        f"⚠️ Falló actualización de seguimiento"
                     )
 
             elif hasattr(self.current_tracker, 'update_tracking'):
@@ -1167,27 +1165,22 @@ Por favor, verifique la instalación de los módulos PTZ.
                     f"🔍 Métodos disponibles: {', '.join(available_methods[:10])}"
                 )
 
-                # Intentar llamar directamente al método que sabemos que existe
+                # CORRECCIÓN APLICADA: Usar el método correcto
                 try:
-                    success = self.current_tracker.update_multi_object_tracking(
-                        detections
-                    )
+                    success = self.current_tracker.update_detections(detections)
                     if success:
                         self._log(
                             f"✅ Llamada directa exitosa ({len(detections)} objetos)"
                         )
                     else:
-                        self._log("⚠️ Llamada directa falló")
-                except Exception as direct_error:
-                    self._log(f"❌ Error en llamada directa: {direct_error}")
+                        self._log(
+                            f"⚠️ Llamada directa falló"
+                        )
+                except Exception as e:
+                    self._log(f"❌ Error en llamada directa: {e}")
 
         except Exception as e:
-            self._log(f"❌ Error procesando detecciones: {e}")
-            # Mostrar más información de debug
-            self._log(f"🔍 Tipo de tracker: {type(self.current_tracker)}")
-            self._log(f"🔍 Estado tracking_active: {self.tracking_active}")
-            self._log(f"🔍 Número de detecciones: {len(detections)}")
-
+            self._log(f"❌ Error actualizando detecciones: {e}")
 # Función de creación del sistema completo
 def create_multi_object_ptz_system(camera_list, parent=None):
     """Crear sistema PTZ multi-objeto completo con bridge de integración"""
