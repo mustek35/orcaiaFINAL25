@@ -1208,6 +1208,8 @@ def create_multi_object_ptz_system(camera_list, parent=None):
 
             def send_detections(self, camera_id: str, detections: list, frame_size=(1920, 1080)):
                 """Enviar detecciones al sistema PTZ - FIRMA CORREGIDA"""
+                # Nota: camera_id debe ser el primer parámetro para evitar
+                # confusiones con el orden original (detections, frame_size)
                 try:
                     # Validar parámetros
                     if not isinstance(camera_id, str):
@@ -1216,6 +1218,11 @@ def create_multi_object_ptz_system(camera_list, parent=None):
 
                     if not isinstance(detections, list):
                         print(f"❌ detections debe ser lista, recibido: {type(detections)}")
+                        return False
+
+                    if (not isinstance(frame_size, (tuple, list)) or
+                            len(frame_size) != 2):
+                        print(f"❌ frame_size inválido: {frame_size}")
                         return False
 
                     # Solo procesar si el diálogo está activo
