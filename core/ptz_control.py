@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from onvif import ONVIFCamera
+from typing import Optional
 
 # Movimiento actual
 current_pan_speed = 0.0
@@ -44,7 +45,7 @@ class PTZCameraONVIF:
         }
         self.ptz.ContinuousMove(req)
 
-    def absolute_move(self, pan: float, tilt: float, zoom: float, speed: float | None = None):
+    def absolute_move(self, pan: float, tilt: float, zoom: float, speed: Optional[float] = None):
         """Mover la cámara a una posición absoluta."""
         req = self.ptz.create_type('AbsoluteMove')
         req.ProfileToken = self.profile_token
