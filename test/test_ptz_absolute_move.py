@@ -13,8 +13,6 @@ class MockPTZService:
         self.last_move = None
     def create_type(self, name):
         return SimpleNamespace(ProfileToken=None, Position=None, Velocity=None)
-    if hasattr(SimpleNamespace, 'AbsoluteMove'):
-        pass
     def AbsoluteMove(self, req):
         if self.with_absolute:
             self.last_move = ('Absolute', req)
